@@ -1,9 +1,9 @@
 import torchvision
 # from torchvision import transforms
 try:
-    from . import elementary_tranforms
+    from . import joint_tranforms
 except:
-    import elementary_tranforms
+    import joint_tranforms
 # class preprocessor
 
 
@@ -12,19 +12,24 @@ args = {
     'scale': 416
 }
 
-joint_transform = elementary_tranforms.Compose([
-    elementary_tranforms.RandomHorizontallyFlip(),
-    elementary_tranforms.Resize((args['scale'], args['scale'])),
+joint_transform = joint_tranforms.Compose([
+    # joint_tranforms.RandomHorizontallyFlip(),
+    joint_tranforms.Resize((args['scale'], args['scale'])),
 ])
 
 # val_joint_transform = elementary_tranforms.Compose([
 #     elementary_tranforms.Resize((args['scale'], args['scale']))
 # ])
 #
-img_transform = torchvision.transforms.Compose([
+
+inpt_img_transform = torchvision.transforms.Compose([
+    torchvision.transforms.ToTensor(),
     torchvision.transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
 ])
 
+out_img_transform = torchvision.transforms.Compose([
+    torchvision.transforms.ToTensor(),
+])
 # preprocessor_shdw_mask_net = transforms.Compose([
 #     transforms.Resize(args['scale']),
 #     transforms.ToTensor(),
