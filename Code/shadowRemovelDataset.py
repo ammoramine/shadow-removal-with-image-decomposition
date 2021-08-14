@@ -8,20 +8,32 @@
 from torch.utils.data import Dataset
 import os,glob
 from PIL import Image
+import utils,torch
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
 import numpy as np
 import torch
 
 try:
-    from .preprocess_module import transforms
+    from .preprocess_module import custom_transforms
 except:
-    from preprocess_module import transforms
+    from preprocess_module import custom_transforms
 
 class ShadowRemovalDataSet(Dataset):
-    def __init__(self,path_data):
+    def __init__(self,path_data,joint_transform=None,inpt_img_transform=None,out_img_transform=None):
+        """
+            takes as input a folder containing 2 subfolders (at least)
+            one that contains the input image with shadow, with suffix "_A"
+            and another one that contains shadow masks with suffix "_B"
+        """
         self.path_data = path_data
         self.path_imgs_with_data = self.get_paths_images()
 
         self.inpt_img_shadow_mask = self.get_pairs_inpt_img_shadow_mask()
+
+        self.joint_transform = joint_transform
+        self.inpt_img_transform = inpt_img_transform
+        self.out_img_transform = out_img_transform
 
     def get_pairs_inpt_img_shadow_mask(self):
         """return a list , that outputs pair of inputs image, and shadow mask"""
@@ -39,20 +51,26 @@ class ShadowRemovalDataSet(Dataset):
             "index" of the list sekf.inpt_img_shadow_mask
         """
         path_inpt,path_shdw_mask = self.inpt_img_shadow_mask[index]
-        image_inpt = Image.open(path_inpt)
-        shdw_mask = Image.open(path_shdw_mask)
-        return image_inpt,shdw_mask
+        inpt_image = Image.open(path_inpt)
+        shadow_mask = Image.open(path_shdw_mask)
+
+        if self.joint_transform is not None:
+            inpt_image, shadow_mask = self.joint_transform(inpt_image, shadow_mask)
+        if self.inpt_img_transform is not None:
+            inpt_image = self.inpt_img_transform(inpt_image)
+        if self.out_img_transform is not None:
+            shadow_mask = self.out_img_transform(shadow_mask)
+        return inpt_image,shadow_mask
 
     def __len__(self):
         return len(self.inpt_img_shadow_mask)
 
-    def preprocess_inpt(self,inpt):
-        """
-            preprocess the input image, in order to be processed by
-            the pretrained shadow mask detector network
-        """
-        out = transforms.preprocessor_shdw_mask_net(inpt)
-        return out
+    def get_first_elements(self,nb):
+        iterator = iter(self)
+        els = [next(iterator) for el in range(nb)]
+        return els
+    #TODO : test if appyling tensor transform on set of pil imaages is faster than appyling tensor
+    # transform at the end
 
     def collate_fn(self,list_pair_imgs):
         """
@@ -65,15 +83,17 @@ class ShadowRemovalDataSet(Dataset):
         batch_sdw_masks = []
 
         for inpt_image,shadow_mask in list_pair_imgs:
-            inpt_image,shadow_mask = transforms.joint_transform(inpt_image, shadow_mask)
             batch_inpt_images.append(inpt_image)
             batch_sdw_masks.append(shadow_mask)
+        batch_inpt_images = torch.stack(batch_inpt_images)
+        batch_sdw_masks = torch.stack(batch_sdw_masks)
 
+        batch_inpt_images = batch_inpt_images.to(device)
+        batch_sdw_masks = batch_sdw_masks.to(device)
 
-        batch_inpt_images = torch.Tensor([np.array(el) for el in batch_inpt_images])
-        batch_inpt_images = torch.moveaxis(batch_inpt_images,3,1)
-        batch_sdw_masks = torch.Tensor([np.array(el) for el in batch_sdw_masks])
         return batch_inpt_images,batch_sdw_masks
+
+
 
 if __name__ == '__main__':
 
@@ -82,18 +102,19 @@ if __name__ == '__main__':
     pathTrainingData = "../Data/ISTD_Dataset/train"
     pathTestingData = "../Data/ISTD_Dataset/test"
 
+    dtset = ShadowRemovalDataSet(
+            pathTrainingData,
+    joint_transform=custom_transforms.joint_transform,
+    inpt_img_transform = custom_transforms.inpt_img_transform,
+    out_img_transform = custom_transforms.out_img_transform
+            )
+
     dtset = ShadowRemovalDataSet(pathTrainingData)
-
-
-    els = []
-    for i, el in enumerate(dtset):
-        els.append(el)
-        if i == 10:
-            break
+    els = dtset.get_first_elements(10)
 
     list_pair_imgs = els
 
-    res = dtset.collate_fn(list_pair_imgs)
+    # res = dtset.collate_fn(list_pair_imgs)
     stop = time.time()
 
     print(stop-start)
