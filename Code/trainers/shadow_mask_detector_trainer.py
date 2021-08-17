@@ -72,7 +72,7 @@ if __name__ == '__main__':
     inpt_img_transform = custom_transforms.inpt_img_transform,
     out_img_transform = custom_transforms.out_img_transform
             )
-    dt_loader = DataLoader(dtset,batch_size=8,collate_fn=dtset.collate_fn)
+    dt_loader = DataLoader(dtset,batch_size=8,collate_fn=dtset.collate_fn,shuffle=True)
 
     # cur_dir = os.getcwd()
     # os.chdir(os.path.join(dirFile,"../models"))
@@ -103,13 +103,13 @@ if __name__ == '__main__':
     # mse_loss = nn.MSELoss()
 
     torch.autograd.set_detect_anomaly(True)
-    nb_epochs = 10
+    nb_epochs = 30
     losses = []
     curr_iter = args['last_iter']
     for epoch in range(nb_epochs):
         loss_sum = 0
-        for el in dt_loader:
-            print((epoch+1)*curr_iter/len(dt_loader))
+        for i,el in enumerate(dt_loader):
+            print((epoch+1)*i/len(dt_loader))
             optimizer.param_groups[0]['lr'] = 2 * args['lr'] * (1 - float(curr_iter) / args['iter_num']) ** args['lr_decay']
             optimizer.param_groups[1]['lr'] = args['lr'] * (1 - float(curr_iter) / args['iter_num']) ** args['lr_decay']
             inpt = el[0].to(device)
@@ -142,4 +142,4 @@ if __name__ == '__main__':
         loss_mean = loss_sum/len(dt_loader)
         print(loss_mean)
         losses.append(loss_mean)
-            # break
+        # break
