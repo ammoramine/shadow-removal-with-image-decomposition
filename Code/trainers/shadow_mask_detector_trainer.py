@@ -142,4 +142,3 @@ if __name__ == '__main__':
         loss_mean = loss_sum/len(dt_loader)
         print(loss_mean)
         losses.append(loss_mean)
-        # break
