@@ -4,7 +4,7 @@ from torch.utils.data import DataLoader
 dirFile = os.path.dirname(__file__)
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-device = 'cpu'
+# device = 'cpu'
 try:
     from .. import shadowRemovelDataset
 except:
