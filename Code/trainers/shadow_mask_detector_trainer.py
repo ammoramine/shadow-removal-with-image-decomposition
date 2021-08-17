@@ -108,8 +108,8 @@ if __name__ == '__main__':
     curr_iter = args['last_iter']
     for epoch in range(nb_epochs):
         loss_sum = 0
-        for el in dt_loader:
-            print((epoch+1)*curr_iter/len(dt_loader))
+        for i,el in enumerate(dt_loader):
+            print((epoch+1)*i/len(dt_loader))
             optimizer.param_groups[0]['lr'] = 2 * args['lr'] * (1 - float(curr_iter) / args['iter_num']) ** args['lr_decay']
             optimizer.param_groups[1]['lr'] = args['lr'] * (1 - float(curr_iter) / args['iter_num']) ** args['lr_decay']
             inpt = el[0].to(device)
@@ -142,4 +142,4 @@ if __name__ == '__main__':
         loss_mean = loss_sum/len(dt_loader)
         print(loss_mean)
         losses.append(loss_mean)
-            # break
+        break
