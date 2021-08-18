@@ -8,8 +8,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
-device = 'cpu'
+# device = 'cuda' if torch.cuda.is_available() else 'cpu'
+# device = 'cpu'
 try:
     from .. import shadowRemovelDataset
     from ..preprocess_module import custom_transforms
@@ -58,6 +58,8 @@ class Trainer:
     def train(self,nb_epochs=40):
         for epoch in range(nb_epochs):
             loss_train_mean = self.train_over_epoch()
+            with torch.no_grad():
+                torch.cuda.empty_cache()
             loss_val_mean = self.validate_over_epoch()
             print(f" training loss for epoch {epoch} is {loss_train_mean}")
             print(f" validation loss for epoch {epoch} is {loss_val_mean}")
@@ -74,11 +76,12 @@ class Trainer:
                 loss_train = self.iterate_for_training_batch()
                 loss_train_sum += loss_train
             except StopIteration:
-                print("Iteration is over")
+                # print("Iteration  over epoch")
                 break
         loss_train_mean = loss_train_sum/len(self.dt_loader_train)
         return loss_train_mean
 
+    @torch.no_grad()
     def validate_over_epoch(self):
         """iterate over all the shuffled batches of the training dataset for one epoch """
         self.dt_loader_val_iterator = iter(self.dt_loader_val)
@@ -91,7 +94,7 @@ class Trainer:
                 loss_val = self.iterate_for_validation_batch()
                 loss_val_sum += loss_val
             except StopIteration:
-                print("Iteration is over")
+                # print("Iteration is over")
                 break
         loss_val_mean = loss_val_sum/len(self.dt_loader_val)
         return loss_val_mean
@@ -209,8 +212,17 @@ def show_sample_at_idx(res,idx):
 
 
 if __name__ == '__main__':
-    # optimiezr = optim.Adam()
+    import argparse
+    parser = argparse.ArgumentParser()
 
+    parser.add_argument("-d","--device", help = "choose the device on which to run the code", choices = ["cuda", "cpu"], default = "cuda")
+    parser.add_argument("-t","--truncate", help = "choose to limit the number of element on the dataset, for debuggins purpose", type= int, default = None)
+    parser.add_argument("-nb","--nb_epochs", help = "the number of epochs for the training process",type=int,default=40)
+
+    args_parser = parser.parse_args()
+    nb_epochs = args_parser.nb_epochs
+    device = args_parser.device
+    truncate = args_parser.truncate
 
     rel_path_model = "../../Data/BDRAR.pth"
     path_model = os.path.join(dirFile,rel_path_model)
@@ -221,13 +233,13 @@ if __name__ == '__main__':
     rel_path_input_data = "../../Data/ISTD_Dataset/test"
     path_input_Data_val = os.path.join(dirFile,rel_path_input_data)
 
-    truncate = 16
     dtset_train = shadowRemovelDataset.ShadowRemovalDataSet(path_input_Data_train,joint_transform=custom_transforms.joint_transform,inpt_img_transform = custom_transforms.inpt_img_transform,out_img_transform = custom_transforms.out_img_transform,truncate=truncate)
     dtset_val = shadowRemovelDataset.ShadowRemovalDataSet(path_input_Data_val,joint_transform=custom_transforms.joint_transform,inpt_img_transform = custom_transforms.inpt_img_transform,out_img_transform = custom_transforms.out_img_transform,truncate=truncate)
-
+    # dtset_val = dtset_train
     dt_loader_train = DataLoader(dtset_train,batch_size=args["train_batch_size"],collate_fn=dtset_train.collate_fn,shuffle=True)
     dt_loader_val = DataLoader(dtset_val,batch_size=args["train_batch_size"],collate_fn=dtset_val.collate_fn,shuffle=True)
 
+    # dt_loader_val = dt_loader_train
     # must load with cuda anyway, the emodel can't be loaded using cpu, which is a problem
 
     model = modelBDRAR.BDRAR().to("cuda")
@@ -247,7 +259,7 @@ if __name__ == '__main__':
 
     alg_trainer = Trainer(optimizer,model,dt_loader_train,dt_loader_val,device)
 
-    # alg_trainer.train()
+    alg_trainer.train(nb_epochs)
 
     # from torch import nn
     # bce_logit = nn.BCEWithLogitsLoss().cuda()
