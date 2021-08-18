@@ -20,7 +20,7 @@ except:
     from preprocess_module import custom_transforms
 
 class ShadowRemovalDataSet(Dataset):
-    def __init__(self,path_data,joint_transform=None,inpt_img_transform=None,out_img_transform=None):
+    def __init__(self,path_data,joint_transform=None,inpt_img_transform=None,out_img_transform=None,truncate=None):
         """
             takes as input a folder containing 2 subfolders (at least)
             one that contains the input image with shadow, with suffix "_A"
@@ -28,6 +28,10 @@ class ShadowRemovalDataSet(Dataset):
         """
         self.path_data = path_data
         self.path_imgs_with_data = self.get_paths_images()
+
+        if truncate is not None:
+            if isinstance(truncate,int):
+                self.path_imgs_with_data = self.path_imgs_with_data[:truncate]
 
         self.inpt_img_shadow_mask = self.get_pairs_inpt_img_shadow_mask()
 
@@ -51,7 +55,7 @@ class ShadowRemovalDataSet(Dataset):
             "index" of the list sekf.inpt_img_shadow_mask
         """
         path_inpt,path_shdw_mask = self.inpt_img_shadow_mask[index]
-        inpt_image = Image.open(path_inpt)
+        inpt_image = Image.open(path_inpt)#.convert("RGB")
         shadow_mask = Image.open(path_shdw_mask)
 
         if self.joint_transform is not None:
@@ -71,6 +75,14 @@ class ShadowRemovalDataSet(Dataset):
         return els
     #TODO : test if appyling tensor transform on set of pil imaages is faster than appyling tensor
     # transform at the end
+
+    def sample(self,with_path=False):
+        index = np.random.randint(len(self))
+        res = self.__getitem__(index)
+        if with_path:
+            return res,(index,self.path_imgs_with_data[index])
+        else:
+            return res
 
     def collate_fn(self,list_pair_imgs):
         """
