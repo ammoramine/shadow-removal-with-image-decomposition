@@ -2,13 +2,22 @@ from torch import optim
 import torch,os
 from torch.utils.data import DataLoader
 dirFile = os.path.dirname(__file__)
+from torch import nn
+from itertools import cycle
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-# device = 'cpu'
+device = 'cpu'
 try:
     from .. import shadowRemovelDataset
+    from ..preprocess_module import custom_transforms
+    from .. import shadowRemovelDataset
+    from ..models.BDRARImported import modelBDRAR
 except:
     import shadowRemovelDataset
+    from preprocess_module import custom_transforms
+    import shadowRemovelDataset
+    from models.BDRARImported import modelBDRAR
+
 
 
 args = {
@@ -19,22 +28,114 @@ args = {
     'lr_decay': 0.9,
     'weight_decay': 5e-4,
     'momentum': 0.9,
-    'snapshot': '',
     'scale': 416
 }
 
 
 class Trainer:
-    def __init__(self,optimizer,model,dt_loader):
+    def __init__(self,optimizer,model,dt_loader_train,dt_loader_val,device):
         self.optimizer = optimizer
         self.model = model
-        self.dt_loader = dt_loader
+        self.dt_loader_train = dt_loader_train
+        self.dt_loader_val = dt_loader_val
+        self.device = device
+        self.bce_logit = nn.BCEWithLogitsLoss().to(self.device)
 
-    def train(self):
-        pass
+        # self.dt_loader_train_iterator = iter(self.dt_loader_train)
+        # self.dt_loader_val_iterator = iter(cycle(self.dt_loader_val))
+        torch.autograd.set_detect_anomaly(True)
+        self.train_losses = []
+        self.val_losses = []
 
+    def train(self,nb_epochs=40):
+        for epoch in range(nb_epochs):
+            loss_train_mean = self.train_over_epoch()
+            loss_val_mean = self.validate_over_epoch()
+            print(f"training loss for epoch {epoch} is {loss_train_mean}")
+            print(f"validation loss for epoch {epoch} is {loss_val_mean}")
+            self.train_losses.append(loss_train_mean)
+            self.val_losses.append(loss_val_mean)
+    def train_over_epoch(self):
+        """iterate over all the shuffled batches of the training dataset for one epoch """
+        self.dt_loader_train_iterator = iter(self.dt_loader_train)
+        loss_train_sum = 0
+        while True:
+            try:
+                #TODO ,set the optimizer outside the loop
+                loss_train = self.iterate_for_training_batch()
+                loss_train_sum += loss_train
+            except StopIteration:
+                print("Iteration is over")
+                break
+        loss_train_mean = loss_train_sum/len(self.dt_loader_train)
+        return loss_train_mean
 
-def show_output(inpt):
+    def validate_over_epoch(self):
+        """iterate over all the shuffled batches of the training dataset for one epoch """
+        self.dt_loader_val_iterator = iter(self.dt_loader_val)
+        loss_val_sum = 0
+        while True:
+            try:
+                #TODO ,set the optimizer outside the loop
+                loss_val = self.iterate_for_validation_batch()
+                loss_val_sum += loss_val
+            except StopIteration:
+                print("Iteration is over")
+                break
+        loss_val_mean = loss_val_sum/len(self.dt_loader_val)
+        return loss_val_mean
+
+    def reduce_learning_rate(self):
+        """folloxing a decay, we just copy the proposed technique for the original model"""
+        curr_iter = len(self.train_losses)
+        optimizer.param_groups[0]['lr'] = 2 * args['lr'] * (1 - float(curr_iter) / args['iter_num']) ** args['lr_decay']
+        optimizer.param_groups[1]['lr'] = args['lr'] * (1 - float(curr_iter) / args['iter_num']) ** args['lr_decay']
+        return optimizer
+
+    def get_training_loss(self):
+        el = next(self.dt_loader_train_iterator)
+        inpt = el[0].to(device)
+        labels = el[1].to(device)
+        self.model.train()
+        fuse_predict, predict1_h2l, predict2_h2l, predict3_h2l, predict4_h2l, predict1_l2h, predict2_l2h, predict3_l2h, predict4_l2h = self.model(inpt)
+
+        loss_fuse = self.bce_logit(fuse_predict, labels)
+        loss1_h2l = self.bce_logit(predict1_h2l, labels)
+        loss2_h2l = self.bce_logit(predict2_h2l, labels)
+        loss3_h2l = self.bce_logit(predict3_h2l, labels)
+        loss4_h2l = self.bce_logit(predict4_h2l, labels)
+        loss1_l2h = self.bce_logit(predict1_l2h, labels)
+        loss2_l2h = self.bce_logit(predict2_l2h, labels)
+        loss3_l2h = self.bce_logit(predict3_l2h, labels)
+        loss4_l2h = self.bce_logit(predict4_l2h, labels)
+
+        loss = loss_fuse + loss1_h2l + loss2_h2l + loss3_h2l + loss4_h2l + loss1_l2h + loss2_l2h + loss3_l2h + loss4_l2h
+        return loss
+
+    def get_validation_loss(self):
+        el = next(self.dt_loader_val_iterator)
+        inpt = el[0].to(device)
+        labels = el[1].to(device)
+        self.model.eval()
+        fuse_predict = self.model(inpt)
+        loss_fuse = self.bce_logit(fuse_predict, labels)
+        return loss_fuse
+
+    def iterate_for_training_batch(self):
+        self.optimizer = self.reduce_learning_rate()
+
+        self.optimizer.zero_grad()
+        loss = self.get_training_loss()
+        loss.backward()
+
+        self.optimizer.step()
+        return loss
+
+    def iterate_for_validation_batch(self):
+        loss_val = self.get_validation_loss()
+        #add code for validation metric
+        return loss_val
+def show_output(inpt,model):
     """input image wiht shadow processed"""
     import matplotlib.pyplot as plt
     import numpy as np
@@ -44,7 +145,9 @@ def show_output(inpt):
     fig,axs = plt.subplots(1,2)
 
     inpt = inpt.to("cpu").detach()
-    axs[0].imshow(np.moveaxis(inpt.numpy().squeeze(), 0, 2))
+    inpt_as_np_rgb = np.moveaxis(inpt.numpy().squeeze(), 0, 2)
+    inpt_as_np_rgb_rescaled = (inpt_as_np_rgb - inpt_as_np_rgb.min()) / (inpt_as_np_rgb.max() - inpt_as_np_rgb.min())
+    axs[0].imshow(inpt_as_np_rgb_rescaled)
     axs[1].imshow(out.squeeze(),cmap='gray')
 
     plt.show()
@@ -57,88 +160,81 @@ if __name__ == '__main__':
     path_model = os.path.join(dirFile,rel_path_model)
 
     rel_path_input_data = "../../Data/ISTD_Dataset/train"
-    path_input_Data = os.path.join(dirFile,rel_path_input_data)
+    path_input_Data_train = os.path.join(dirFile,rel_path_input_data)
 
-    # dtset = shadowRemovelDataset.ShadowRemovalDataSet(path_input_Data)
-    try:
-        from ..preprocess_module import custom_transforms
-        from .. import shadowRemovelDataset
-    except:
-        from preprocess_module import custom_transforms
-        import shadowRemovelDataset
-    dtset = shadowRemovelDataset.ShadowRemovalDataSet(
-            path_input_Data,
-    joint_transform=custom_transforms.joint_transform,
-    inpt_img_transform = custom_transforms.inpt_img_transform,
-    out_img_transform = custom_transforms.out_img_transform
-            )
-    dt_loader = DataLoader(dtset,batch_size=8,collate_fn=dtset.collate_fn,shuffle=True)
+    rel_path_input_data = "../../Data/ISTD_Dataset/test"
+    path_input_Data_val = os.path.join(dirFile,rel_path_input_data)
 
-    # cur_dir = os.getcwd()
-    # os.chdir(os.path.join(dirFile,"../models"))
-    # model = torch.load(path_model)
+    truncate = 16
+    dtset_train = shadowRemovelDataset.ShadowRemovalDataSet(path_input_Data_train,joint_transform=custom_transforms.joint_transform,inpt_img_transform = custom_transforms.inpt_img_transform,out_img_transform = custom_transforms.out_img_transform,truncate=truncate)
+    dtset_val = shadowRemovelDataset.ShadowRemovalDataSet(path_input_Data_val,joint_transform=custom_transforms.joint_transform,inpt_img_transform = custom_transforms.inpt_img_transform,out_img_transform = custom_transforms.out_img_transform,truncate=truncate)
 
-    from models.BDRARImported import modelBDRAR
+    dt_loader_train = DataLoader(dtset_train,batch_size=args["train_batch_size"],collate_fn=dtset_train.collate_fn,shuffle=True)
+    dt_loader_val = DataLoader(dtset_val,batch_size=args["train_batch_size"],collate_fn=dtset_val.collate_fn,shuffle=True)
+
+    # must load with cuda anyway, the emodel can't be loaded using cpu, which is a problem
+
     model = modelBDRAR.BDRAR().to("cuda")
-    rel_path_model = "../../Data/3000.pth"
+    rel_path_model = "../../Data/3000_old.pth"
     path_model = os.path.join(dirFile, rel_path_model)
     assert os.path.exists(path_model)
     model.load_state_dict(torch.load(path_model, map_location=torch.device("cuda")))
 
-    # os.chdir(cur_dir)
-
     model = model.to(device)
     model.train()
+
 
     # optimizer = optim.Adam(model.parameters(), lr=0.05)
     optimizer = optim.SGD([
         {'params': [param for name, param in model.named_parameters() if name[-4:] == 'bias'],'lr': 2 * args['lr']},
         {'params': [param for name, param in model.named_parameters() if name[-4:] != 'bias'],'lr': args['lr'], 'weight_decay': args['weight_decay']}], momentum=args['momentum'])
 
-    alg_trainer = Trainer(model,optimizer,dt_loader)
+    alg_trainer = Trainer(optimizer,model,dt_loader_train,dt_loader_val,device)
 
-    from torch import nn
-    bce_logit = nn.BCEWithLogitsLoss().cuda()
+    # alg_trainer.train()
+
+    # from torch import nn
+    # bce_logit = nn.BCEWithLogitsLoss().cuda()
 
     # mse_loss = nn.MSELoss()
 
-    torch.autograd.set_detect_anomaly(True)
-    nb_epochs = 30
-    losses = []
-    curr_iter = args['last_iter']
-    for epoch in range(nb_epochs):
-        loss_sum = 0
-        for i,el in enumerate(dt_loader):
-            print((epoch+1)*i/len(dt_loader))
-            optimizer.param_groups[0]['lr'] = 2 * args['lr'] * (1 - float(curr_iter) / args['iter_num']) ** args['lr_decay']
-            optimizer.param_groups[1]['lr'] = args['lr'] * (1 - float(curr_iter) / args['iter_num']) ** args['lr_decay']
-            inpt = el[0].to(device)
-            labels = el[1].to(device)
-            model.train()
-            ###########################################################################################
-            optimizer.zero_grad()
-
-            fuse_predict, predict1_h2l, predict2_h2l, predict3_h2l, predict4_h2l, \
-            predict1_l2h, predict2_l2h, predict3_l2h, predict4_l2h = model(inpt)
-
-
-            loss_fuse = bce_logit(fuse_predict, labels)
-            loss1_h2l = bce_logit(predict1_h2l, labels)
-            loss2_h2l = bce_logit(predict2_h2l, labels)
-            loss3_h2l = bce_logit(predict3_h2l, labels)
-            loss4_h2l = bce_logit(predict4_h2l, labels)
-            loss1_l2h = bce_logit(predict1_l2h, labels)
-            loss2_l2h = bce_logit(predict2_l2h, labels)
-            loss3_l2h = bce_logit(predict3_l2h, labels)
-            loss4_l2h = bce_logit(predict4_l2h, labels)
-
-            loss = loss_fuse + loss1_h2l + loss2_h2l + loss3_h2l + loss4_h2l + loss1_l2h + loss2_l2h + loss3_l2h + loss4_l2h
-            loss_sum += loss
-            loss.backward()
-
-            ###########################################################################################
-            optimizer.step()
-
-        loss_mean = loss_sum/len(dt_loader)
-        print(loss_mean)
-        losses.append(loss_mean)
+    # torch.autograd.set_detect_anomaly(True)
+    # nb_epochs = 30
+    # losses = []
+    # curr_iter = args['last_iter']
+    # for epoch in range(nb_epochs):
+    #     loss_sum = 0
+    #     for i,el in enumerate(dt_loader_train):
+    #         print((epoch+1)*i/len(dt_loader_train))
+    #         optimizer.param_groups[0]['lr'] = 2 * args['lr'] * (1 - float(curr_iter) / args['iter_num']) ** args['lr_decay']
+    #         optimizer.param_groups[1]['lr'] = args['lr'] * (1 - float(curr_iter) / args['iter_num']) ** args['lr_decay']
+    #         inpt = el[0].to(device)
+    #         labels = el[1].to(device)
+    #         model.train()
+    #         ###########################################################################################
+    #         optimizer.zero_grad()
+    #
+    #         fuse_predict, predict1_h2l, predict2_h2l, predict3_h2l, predict4_h2l, \
+    #         predict1_l2h, predict2_l2h, predict3_l2h, predict4_l2h = model(inpt)
+    #
+    #
+    #         loss_fuse = bce_logit(fuse_predict, labels)
+    #         loss1_h2l = bce_logit(predict1_h2l, labels)
+    #         loss2_h2l = bce_logit(predict2_h2l, labels)
+    #         loss3_h2l = bce_logit(predict3_h2l, labels)
+    #         loss4_h2l = bce_logit(predict4_h2l, labels)
+    #         loss1_l2h = bce_logit(predict1_l2h, labels)
+    #         loss2_l2h = bce_logit(predict2_l2h, labels)
+    #         loss3_l2h = bce_logit(predict3_l2h, labels)
+    #         loss4_l2h = bce_logit(predict4_l2h, labels)
+    #
+    #         loss = loss_fuse + loss1_h2l + loss2_h2l + loss3_h2l + loss4_h2l + loss1_l2h + loss2_l2h + loss3_l2h + loss4_l2h
+    #         loss_sum += loss
+    #         loss.backward()
+    #
+    #         ###########################################################################################
+    #         optimizer.step()
+    #
+    #     loss_mean = loss_sum/len(dt_loader_train)
+    #     print(loss_mean)
+    #     losses.append(loss_mean)
