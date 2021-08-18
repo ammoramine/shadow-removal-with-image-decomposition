@@ -4,6 +4,9 @@ from torch.utils.data import DataLoader
 dirFile = os.path.dirname(__file__)
 from torch import nn
 from itertools import cycle
+import matplotlib.pyplot as plt
+import numpy as np
+import torch
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 device = 'cpu'
@@ -13,12 +16,14 @@ try:
     from .. import shadowRemovelDataset
     from ..models.BDRARImported import modelBDRAR
     from .. import utils
+    from ..metrics import shadow_detector_metric
 except: #if the module is launched directly from the Code repertory
     import shadowRemovelDataset
     from preprocess_module import custom_transforms
     import shadowRemovelDataset
     from models.BDRARImported import modelBDRAR
     import utils
+    from metrics import shadow_detector_metric
 
 
 
@@ -42,6 +47,7 @@ class Trainer:
         self.dt_loader_val = dt_loader_val
         self.device = device
         self.bce_logit = nn.BCEWithLogitsLoss().to(self.device)
+        self.metric = shadow_detector_metric.BER_metric(device)
 
         # self.dt_loader_train_iterator = iter(self.dt_loader_train)
         # self.dt_loader_val_iterator = iter(cycle(self.dt_loader_val))
@@ -53,8 +59,9 @@ class Trainer:
         for epoch in range(nb_epochs):
             loss_train_mean = self.train_over_epoch()
             loss_val_mean = self.validate_over_epoch()
-            print(f"training loss for epoch {epoch} is {loss_train_mean}")
-            print(f"validation loss for epoch {epoch} is {loss_val_mean}")
+            print(f" training loss for epoch {epoch} is {loss_train_mean}")
+            print(f" validation loss for epoch {epoch} is {loss_val_mean}")
+            print(f" result of evaluation metric for epoch {epoch} is {self.metric.compute()}")
             self.train_losses.append(loss_train_mean)
             self.val_losses.append(loss_val_mean)
     def train_over_epoch(self):
@@ -76,6 +83,8 @@ class Trainer:
         """iterate over all the shuffled batches of the training dataset for one epoch """
         self.dt_loader_val_iterator = iter(self.dt_loader_val)
         loss_val_sum = 0
+        self.metric.reset()
+        # the metric is computed during loss computation inside the function for loss computation
         while True:
             try:
                 #TODO ,set the optimizer outside the loop
@@ -114,13 +123,15 @@ class Trainer:
         loss = loss_fuse + loss1_h2l + loss2_h2l + loss3_h2l + loss4_h2l + loss1_l2h + loss2_l2h + loss3_l2h + loss4_l2h
         return loss
 
-    def get_validation_loss(self):
+    def get_validation_loss(self,with_metric_eval=True):
         el = next(self.dt_loader_val_iterator)
         inpt = el[0].to(device)
         labels = el[1].to(device)
         self.model.eval()
         fuse_predict = self.model(inpt)
         loss_fuse = self.bce_logit(fuse_predict, labels)
+        if with_metric_eval:
+            self.metric.update(fuse_predict,labels)
         return loss_fuse
 
     def iterate_for_training_batch(self):
@@ -139,8 +150,6 @@ class Trainer:
         return loss_val
 def show_output(inpt,model):
     """input image wiht shadow processed"""
-    import matplotlib.pyplot as plt
-    import numpy as np
     model.eval()
     out = model(inpt).to("cpu").detach().numpy()
 
@@ -162,10 +171,28 @@ def get_results_for_els_witgh_gd_truth(el,model):
     out = model(el[0].to("cpu"))
     gd_truth = el[1]
     return el[0],out,gd_truth
+#
+#
+# def compute_BER_metric(output,ground_truth):
+#     P = output>0.5 # positive
+#     N = ~P #negatives
+#     S = ground_truth>0.5 # shadow pixels
+#     NS = ~S # non shadow pixels
+#
+#     TP = torch.sum(P*S) # number true positive
+#
+#     TN = torch.sum(N*NS) # true negative
+#
+#     NumS = torch.sum(S)
+#     NumNS = torch.sum(NS)
+#
+#     NumS = max(NumS,1)
+#     NumNS = max(NumNS,1)
+#
+#     BER = (1 - 0.5 * (TP/NumS + TN/NumNS)) * 100
+#     return BER
 
 def show_sample_at_idx(res,idx):
-    import matplotlib.pyplot as plt
-    import numpy as np
     assert idx < len(res)
 
     inpt,out,gd_th = res
