@@ -12,11 +12,13 @@ try:
     from ..preprocess_module import custom_transforms
     from .. import shadowRemovelDataset
     from ..models.BDRARImported import modelBDRAR
-except:
+    from .. import utils
+except: #if the module is launched directly from the Code repertory
     import shadowRemovelDataset
     from preprocess_module import custom_transforms
     import shadowRemovelDataset
     from models.BDRARImported import modelBDRAR
+    import utils
 
 
 
@@ -151,6 +153,33 @@ def show_output(inpt,model):
     axs[1].imshow(out.squeeze(),cmap='gray')
 
     plt.show()
+
+
+def get_results_for_els_witgh_gd_truth(el,model):
+    """ get an element from the data_loader, and"""
+    model.eval()
+    model = model.to("cpu")
+    out = model(el[0].to("cpu"))
+    gd_truth = el[1]
+    return el[0],out,gd_truth
+
+def show_sample_at_idx(res,idx):
+    import matplotlib.pyplot as plt
+    import numpy as np
+    assert idx < len(res)
+
+    inpt,out,gd_th = res
+    inpt, out, gd_th = inpt[idx].cpu(),out[idx].cpu(),gd_th [idx].cpu()
+
+    fig,axs = plt.subplots(1,3)
+
+
+    axs[0].imshow(utils.rescale_to_float(np.moveaxis(inpt.detach().numpy().squeeze(), 0, 2)))
+    axs[1].imshow(out.detach().squeeze().numpy(),cmap='gray')
+    axs[2].imshow(gd_th.detach().squeeze().numpy(),cmap='gray')
+
+    plt.show()
+
 
 if __name__ == '__main__':
     # optimiezr = optim.Adam()
