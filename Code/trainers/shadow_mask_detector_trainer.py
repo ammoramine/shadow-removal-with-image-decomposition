@@ -40,12 +40,13 @@ args = {
 
 
 class Trainer:
-    def __init__(self,optimizer,model,dt_loader_train,dt_loader_val,device):
+    def __init__(self,optimizer,model,dt_loader_train,dt_loader_val,device,path_model):
         self.optimizer = optimizer
         self.model = model
         self.dt_loader_train = dt_loader_train
         self.dt_loader_val = dt_loader_val
         self.device = device
+        self.path_model = path_model
         self.bce_logit = nn.BCEWithLogitsLoss().to(self.device)
         self.metric = shadow_detector_metric.BER_metric(device)
 
@@ -66,6 +67,7 @@ class Trainer:
             print(f" result of evaluation metric for epoch {epoch} is {self.metric.compute()}")
             self.train_losses.append(loss_train_mean)
             self.val_losses.append(loss_val_mean)
+            torch.save(self.model, self.path_model)
     def train_over_epoch(self):
         """iterate over all the shuffled batches of the training dataset for one epoch """
         self.dt_loader_train_iterator = iter(self.dt_loader_train)
@@ -151,6 +153,9 @@ class Trainer:
         loss_val = self.get_validation_loss()
         #add code for validation metric
         return loss_val
+
+    def  save(self):
+        self.model.save()
 def show_output(inpt,model):
     """input image wiht shadow processed"""
     model.eval()
@@ -257,10 +262,13 @@ if __name__ == '__main__':
         {'params': [param for name, param in model.named_parameters() if name[-4:] == 'bias'],'lr': 2 * args['lr']},
         {'params': [param for name, param in model.named_parameters() if name[-4:] != 'bias'],'lr': args['lr'], 'weight_decay': args['weight_decay']}], momentum=args['momentum'])
 
-    alg_trainer = Trainer(optimizer,model,dt_loader_train,dt_loader_val,device)
-
+    path_model = path_model.replace("_old", "")
+    alg_trainer = Trainer(optimizer,model,dt_loader_train,dt_loader_val,device,path_model)
+    import time
+    start = time.time()
     alg_trainer.train(nb_epochs)
-
+    stop = time.time()
+    print(stop-start)
     # from torch import nn
     # bce_logit = nn.BCEWithLogitsLoss().cuda()
 
