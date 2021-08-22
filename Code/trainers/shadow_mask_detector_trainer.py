@@ -241,7 +241,7 @@ if __name__ == '__main__':
     # must load with cuda anyway, the emodel can't be loaded using cpu, which is a problem
 
     model = modelBDRAR.BDRAR().to("cuda")
-    rel_path_model = "../../Data/3000_old.pth"
+    rel_path_model = "../../Data/3000.pth"
     path_model = os.path.join(dirFile, rel_path_model)
     assert os.path.exists(path_model)
     model.load_state_dict(torch.load(path_model, map_location=torch.device("cuda")))
