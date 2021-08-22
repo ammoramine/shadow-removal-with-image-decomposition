@@ -55,6 +55,8 @@ class Trainer:
         torch.autograd.set_detect_anomaly(True)
         self.train_losses = []
         self.val_losses = []
+        self.metric_results = []
+        self.moving_learning_rates = []
 
     def train(self,nb_epochs=40):
         for epoch in range(nb_epochs):
@@ -62,12 +64,19 @@ class Trainer:
             with torch.no_grad():
                 torch.cuda.empty_cache()
             loss_val_mean = self.validate_over_epoch()
+            metric_epoch_results = self.metric.compute()
             print(f" training loss for epoch {epoch} is {loss_train_mean}")
             print(f" validation loss for epoch {epoch} is {loss_val_mean}")
-            print(f" result of evaluation metric for epoch {epoch} is {self.metric.compute()}")
+            print(f" result of evaluation metric for epoch {epoch} is {metric_epoch_results}")
+
             self.train_losses.append(loss_train_mean)
             self.val_losses.append(loss_val_mean)
-            torch.save(self.model, self.path_model)
+            self.metric_results.append(metric_epoch_results)
+            #TODO : change the metric 1 - metric, we compare the value to the minimmum, because
+            # the metric discriminates good results, as results with low value
+            if metric_epoch_results < np.min(self.metric_results) :
+                print("saving the new value, as the value of the metric are better")
+                torch.save(self.model, self.path_model)
     def train_over_epoch(self):
         """iterate over all the shuffled batches of the training dataset for one epoch """
         self.dt_loader_train_iterator = iter(self.dt_loader_train)
@@ -104,11 +113,13 @@ class Trainer:
     def reduce_learning_rate(self):
         """folloxing a decay, we just copy the proposed technique for the original model"""
         curr_iter = len(self.train_losses)
-        optimizer.param_groups[0]['lr'] = 2 * args['lr'] * (1 - float(curr_iter) / args['iter_num']) ** args['lr_decay']
-        optimizer.param_groups[1]['lr'] = args['lr'] * (1 - float(curr_iter) / args['iter_num']) ** args['lr_decay']
+        moving_learning_rate = args['lr'] * (1 - float(curr_iter) / args['iter_num']) ** args['lr_decay']
+        self.moving_learning_rates.append(moving_learning_rate)
+        optimizer.param_groups[0]['lr'] = 2 * moving_learning_rate
+        optimizer.param_groups[1]['lr'] = moving_learning_rate
         return optimizer
 
-    def get_training_loss(self):
+    def get_training_loss(self,with_lose_fuse_only_loss=False):
         el = next(self.dt_loader_train_iterator)
         inpt = el[0].to(device)
         labels = el[1].to(device)
@@ -126,7 +137,10 @@ class Trainer:
         loss4_l2h = self.bce_logit(predict4_l2h, labels)
 
         loss = loss_fuse + loss1_h2l + loss2_h2l + loss3_h2l + loss4_h2l + loss1_l2h + loss2_l2h + loss3_l2h + loss4_l2h
-        return loss
+        if with_lose_fuse_only_loss:
+            return loss,loss_fuse
+        else:
+            return loss
 
     def get_validation_loss(self,with_metric_eval=True):
         el = next(self.dt_loader_val_iterator)
@@ -154,8 +168,7 @@ class Trainer:
         #add code for validation metric
         return loss_val
 
-    def  save(self):
-        self.model.save()
+
 def show_output(inpt,model):
     """input image wiht shadow processed"""
     model.eval()
@@ -179,26 +192,6 @@ def get_results_for_els_witgh_gd_truth(el,model):
     out = model(el[0].to("cpu"))
     gd_truth = el[1]
     return el[0],out,gd_truth
-#
-#
-# def compute_BER_metric(output,ground_truth):
-#     P = output>0.5 # positive
-#     N = ~P #negatives
-#     S = ground_truth>0.5 # shadow pixels
-#     NS = ~S # non shadow pixels
-#
-#     TP = torch.sum(P*S) # number true positive
-#
-#     TN = torch.sum(N*NS) # true negative
-#
-#     NumS = torch.sum(S)
-#     NumNS = torch.sum(NS)
-#
-#     NumS = max(NumS,1)
-#     NumNS = max(NumNS,1)
-#
-#     BER = (1 - 0.5 * (TP/NumS + TN/NumNS)) * 100
-#     return BER
 
 def show_sample_at_idx(res,idx):
     assert idx < len(res)
@@ -269,48 +262,3 @@ if __name__ == '__main__':
     alg_trainer.train(nb_epochs)
     stop = time.time()
     print(stop-start)
-    # from torch import nn
-    # bce_logit = nn.BCEWithLogitsLoss().cuda()
-
-    # mse_loss = nn.MSELoss()
-
-    # torch.autograd.set_detect_anomaly(True)
-    # nb_epochs = 30
-    # losses = []
-    # curr_iter = args['last_iter']
-    # for epoch in range(nb_epochs):
-    #     loss_sum = 0
-    #     for i,el in enumerate(dt_loader_train):
-    #         print((epoch+1)*i/len(dt_loader_train))
-    #         optimizer.param_groups[0]['lr'] = 2 * args['lr'] * (1 - float(curr_iter) / args['iter_num']) ** args['lr_decay']
-    #         optimizer.param_groups[1]['lr'] = args['lr'] * (1 - float(curr_iter) / args['iter_num']) ** args['lr_decay']
-    #         inpt = el[0].to(device)
-    #         labels = el[1].to(device)
-    #         model.train()
-    #         ###########################################################################################
-    #         optimizer.zero_grad()
-    #
-    #         fuse_predict, predict1_h2l, predict2_h2l, predict3_h2l, predict4_h2l, \
-    #         predict1_l2h, predict2_l2h, predict3_l2h, predict4_l2h = model(inpt)
-    #
-    #
-    #         loss_fuse = bce_logit(fuse_predict, labels)
-    #         loss1_h2l = bce_logit(predict1_h2l, labels)
-    #         loss2_h2l = bce_logit(predict2_h2l, labels)
-    #         loss3_h2l = bce_logit(predict3_h2l, labels)
-    #         loss4_h2l = bce_logit(predict4_h2l, labels)
-    #         loss1_l2h = bce_logit(predict1_l2h, labels)
-    #         loss2_l2h = bce_logit(predict2_l2h, labels)
-    #         loss3_l2h = bce_logit(predict3_l2h, labels)
-    #         loss4_l2h = bce_logit(predict4_l2h, labels)
-    #
-    #         loss = loss_fuse + loss1_h2l + loss2_h2l + loss3_h2l + loss4_h2l + loss1_l2h + loss2_l2h + loss3_l2h + loss4_l2h
-    #         loss_sum += loss
-    #         loss.backward()
-    #
-    #         ###########################################################################################
-    #         optimizer.step()
-    #
-    #     loss_mean = loss_sum/len(dt_loader_train)
-    #     print(loss_mean)
-    #     losses.append(loss_mean)
